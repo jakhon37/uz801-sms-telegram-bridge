@@ -6,8 +6,8 @@
 // ===========================
 // WiFi Configuration
 // ===========================
-const char* WIFI_SSID = "Your_WiFi_SSID";
-const char* WIFI_PASSWORD = "Your_WiFi_Password";
+const char* WIFI_SSID = "REMOVED";
+const char* WIFI_PASSWORD = "REMOVED";
 
 // ===========================
 // Email Configuration
@@ -15,10 +15,12 @@ const char* WIFI_PASSWORD = "Your_WiFi_Password";
 const char* SMTP_HOST = "smtp.gmail.com";
 const uint16_t SMTP_PORT = 587; // esp_mail_smtp_port_587;  
 const char* EMAIL_USER = "user@example.com";
-const char* EMAIL_PASSWORD = "your_email_password_or_app_specific_password";
-const char* USER_DOMAIN = "gmail.com"; // change it according to your email domain
+const char* EMAIL_PASSWORD = "REMOVED";
+const char* USER_DOMAIN = "example.com";
 
-const char* EMAIL_RECIPIENT = "recipient_email@example.com";
+const char* EMAIL_RECIPIENT = "user@example.com";
+
+
 
 // ===========================
 // DHT Sensor Configuration
