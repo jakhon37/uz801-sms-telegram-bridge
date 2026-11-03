@@ -1,0 +1,11 @@
+[Unit]
+Description=Forward texts from the UZ801 LTE dongle to Telegram
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/uz801-sms-telegram-bridge/pc/sms_forward.py run
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target
