@@ -1,7 +1,8 @@
 #!/system/bin/sh
 # SMS <-> Telegram bridge that runs on the UZ801 dongle itself (busybox ash).
-# Forwards every received SMS/MMS to the owner's Telegram chat and answers
-# /check, /send <number> <text> (+ /yes or /no), /help from that chat only.
+# Forwards every received SMS/MMS and incoming/missed call to the owner's
+# Telegram chat and answers /check, /calls, /send <number> <text> (+ /yes or
+# /no), /help from that chat only.
 #
 #   sms37.sh            run the bridge (run.sh keeps it alive)
 #   sms37.sh cmd FILE   handle FILE as if its text came from the owner's chat
@@ -9,6 +10,7 @@
 D=/data/local/sms37
 . $D/config                               # TOKEN=..., CHAT=...
 DB=/data/data/com.android.providers.telephony/databases/mmssms.db
+CALLS_DB=/data/data/com.android.providers.contacts/databases/contacts2.db
 CA=$D/cacert.pem
 T=$D/tmp
 POLL=25                                   # Telegram long-poll seconds
@@ -17,15 +19,24 @@ export TZ=KST-9
 mkdir -p $T
 
 HELP="I forward every text this dongle receives.
+Calls can't be answered here; you get a message for each one.
 /check - show the last 5 texts (/check 10 for more)
+/calls - show the last 5 calls (/calls 10 for more)
 /send <number> <text> - send an SMS (asks /yes first)
 /help - this message"
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
 q() { sqlite3 -cmd ".timeout 5000" "$DB" "$1" </dev/null; }
+qc() { sqlite3 -cmd ".timeout 5000" "$CALLS_DB" "$1" </dev/null; }
+
+# Run an Android command (content, am) in the shell SELinux domain.
+# Started at boot we run as init, and app_process from init lands in the zygote
+# domain, which may not call the phone process, so SMS inserts fail there.
+as_shell() { runcon u:r:shell:s0 /system/bin/sh "$@" </dev/null; }
 
 save_state() {
-    printf 'LAST_SMS=%s\nLAST_PDU=%s\nOFFSET=%s\n' "$LAST_SMS" "$LAST_PDU" "$OFFSET" > $D/state.tmp
+    printf 'LAST_SMS=%s\nLAST_PDU=%s\nLAST_CALL=%s\nOFFSET=%s\n' \
+        "$LAST_SMS" "$LAST_PDU" "$LAST_CALL" "$OFFSET" > $D/state.tmp
     mv $D/state.tmp $D/state
 }
 
@@ -77,8 +88,29 @@ fmt_mms() {
     [ -n "$other" ] && printf '\n[attachments not forwarded: %s]' "$other"
 }
 
-# Forward texts newer than the last forwarded ones. Returns 1 on network trouble.
+# calls.type: 1 incoming (answered), 2 outgoing, 3 missed, 4 voicemail, 5 rejected, 6 blocked
+fmt_call() {
+    row=$(qc "select type || '|' || number || '|' || (date/1000) || '|' || duration from calls where _id=$1")
+    type=${row%%"|"*}; row=${row#*"|"}; num=${row%%"|"*}; row=${row#*"|"}; ts=${row%%"|"*}; dur=${row#*"|"}
+    case $type in
+        1) what="Answered call (${dur}s)" ;;
+        2) what="Outgoing call (${dur}s)" ;;
+        3) what="Missed call" ;;
+        4) what="Voicemail" ;;
+        5) what="Rejected call" ;;
+        6) what="Blocked call" ;;
+        *) what="Call (type $type)" ;;
+    esac
+    printf '📞 %s from %s  ·  %s' "$what" "${num:-unknown number}" "$(when $ts)"
+}
+
+# Forward texts and calls newer than the last forwarded ones. Returns 1 on network trouble.
 forward_new() {
+    for id in $(qc "select _id from calls where type!=2 and _id>$LAST_CALL order by _id"); do
+        fmt_call $id > $T/msg
+        send_file $T/msg; [ $? = 1 ] && return 1
+        LAST_CALL=$id; save_state; log "forwarded call $id"
+    done
     for id in $(q "select _id from sms where type=1 and _id>$LAST_SMS order by _id"); do
         fmt_sms $id > $T/msg
         send_file $T/msg; [ $? = 1 ] && return 1
@@ -101,6 +133,13 @@ check() {
         case $r in s:*) fmt_sms ${r#s:} ;; m:*) fmt_mms ${r#m:} ;; esac > $T/msg
         send_file $T/msg
     done
+}
+
+calls() {
+    ids=$(qc "select _id from (select _id from calls order by _id desc limit $1) order by _id")
+    [ -z "$ids" ] && { say "No calls in the dongle's call log."; return; }
+    for id in $ids; do fmt_call $id; echo; done > $T/msg
+    send_file $T/msg
 }
 
 # /send <number> <text>: keep it pending until /yes.
@@ -135,10 +174,15 @@ do_send() {
     rm -f $T/pend.*
     say "Sending to $num…"
     before=$(q "select coalesce(max(_id), 0) from sms")
-    content insert --uri content://sms/queued --bind "address:s:$num" --bind "body:s:$body" \
-        --bind read:i:1 --bind seen:i:1 --bind "date:l:$(date +%s)000" </dev/null
-    am broadcast -a com.android.mms.transaction.SEND_MESSAGE \
-        -n com.android.mms/.transaction.SmsReceiver </dev/null >/dev/null
+    as_shell /system/bin/content insert --uri content://sms/queued --bind "address:s:$num" \
+        --bind "body:s:$body" --bind read:i:1 --bind seen:i:1 --bind "date:l:$(date +%s)000"
+    as_shell /system/bin/am broadcast -a com.android.mms.transaction.SEND_MESSAGE \
+        -n com.android.mms/.transaction.SmsReceiver >/dev/null
+    if [ "$(q "select coalesce(max(_id), 0) from sms")" = "$before" ]; then
+        say "❌ Could not queue the SMS on the dongle (see its log): $num"
+        log "send to $num: insert failed"
+        return
+    fi
     result="⏳ Still sending after 45s; check again later with /check."
     for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
         sleep 3
@@ -162,6 +206,11 @@ handle_cmd() {
             case $n in ''|*[!0-9]*) n=5 ;; esac
             [ $n -gt 20 ] && n=20
             check $n ;;
+        /calls)
+            n=$(awk 'NR == 1 { print $2; exit }' $1)
+            case $n in ''|*[!0-9]*) n=5 ;; esac
+            [ $n -gt 50 ] && n=50
+            calls $n ;;
         /send) prepare_send $1 ;;
         /yes) do_send ;;
         /no) if [ -f $T/pend.exp ]; then rm -f $T/pend.*; say "Cancelled."; else say "Nothing to cancel."; fi ;;
@@ -197,7 +246,9 @@ fi
 # First start: what is already stored counts as seen, old commands are skipped.
 if [ -f $D/state ]; then
     . $D/state
+    LAST_CALL=${LAST_CALL:-0}                 # state from before calls were forwarded
 else
+    LAST_CALL=$(qc "select coalesce(max(_id), 0) from calls")
     LAST_SMS=$(q "select coalesce(max(_id), 0) from sms")
     LAST_PDU=$(q "select coalesce(max(_id), 0) from pdu")
     OFFSET=$(tg getUpdates -d offset=-1 | awk -v DIR=$T -f $D/json.awk | awk 'NR == 2 { print $1 + 1 }')

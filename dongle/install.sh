@@ -15,5 +15,6 @@ adb push /etc/ssl/certs/ca-certificates.crt $D/cacert.pem >/dev/null
 adb shell "busybox --install -s $D/bin; chmod 700 $D; chmod 600 $D/config; chmod 755 $D/*.sh; touch $D/log"
 # Restart the bridge so it picks up the new files (the pattern can't match this shell itself).
 adb shell 'for p in $(busybox pgrep -f "sms37/(run|sms37)[.]sh"); do kill $p; done'
-adb shell "/system/bin/busybox setsid /system/bin/busybox sh $D/run.sh </dev/null >/dev/null 2>&1 &"
+# Start it through init, exactly as at power-on (service flash_recovery runs install-recovery.sh).
+adb shell start flash_recovery
 echo "Copied to $D on the dongle and restarted the bridge."
