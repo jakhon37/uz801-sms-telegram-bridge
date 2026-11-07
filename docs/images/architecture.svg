@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="How texts and calls travel between the carrier, the dongle, Telegram and your phone">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#57606a"/>
+    </marker>
+  </defs>
+  <style>
+    .t  { font-size: 15px; font-weight: 600; fill: #1f2328; }
+    .s  { font-size: 12.5px; fill: #57606a; }
+    .l  { font-size: 12.5px; fill: #1f2328; }
+    .h  { font-size: 13px; font-weight: 700; fill: #57606a; letter-spacing: .04em; }
+    .box { fill: #ffffff; stroke: #d0d7de; stroke-width: 1.5; }
+    .key { fill: #ddf4ff; stroke: #0969da; stroke-width: 2; }
+    .db  { fill: #fff8c5; stroke: #bf8700; stroke-width: 1.5; }
+    .ln  { stroke: #57606a; stroke-width: 1.6; fill: none; }
+    .dash { stroke-dasharray: 6 5; }
+  </style>
+
+  <rect width="1000" height="620" rx="12" fill="#f6f8fa"/>
+
+  <!-- left column: outside world -->
+  <rect class="box" x="30" y="60" width="210" height="72" rx="8"/>
+  <text class="t" x="135" y="90" text-anchor="middle">Your phone</text>
+  <text class="s" x="135" y="112" text-anchor="middle">Telegram app, anywhere</text>
+
+  <rect class="box" x="30" y="222" width="210" height="72" rx="8"/>
+  <text class="t" x="135" y="252" text-anchor="middle">Telegram Bot API</text>
+  <text class="s" x="135" y="274" text-anchor="middle">api.telegram.org, HTTPS over LTE</text>
+
+  <rect class="box" x="30" y="384" width="210" height="72" rx="8"/>
+  <text class="t" x="135" y="414" text-anchor="middle">Mobile network</text>
+  <text class="s" x="135" y="436" text-anchor="middle">LTE data, SMS, MMS, calls</text>
+
+  <rect class="box" x="30" y="512" width="210" height="72" rx="8"/>
+  <text class="t" x="135" y="542" text-anchor="middle">People and services</text>
+  <text class="s" x="135" y="564" text-anchor="middle">text or call the SIM's number</text>
+
+  <path class="ln" d="M135 132 V222" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text class="s" x="147" y="172">messages,</text>
+  <text class="s" x="147" y="188">commands</text>
+  <path class="ln" d="M135 512 V456" marker-end="url(#a)"/>
+
+  <!-- dongle -->
+  <rect x="300" y="30" width="670" height="560" rx="12" fill="#ffffff" stroke="#1f2328" stroke-width="2"/>
+  <text class="h" x="322" y="58">UZ801 DONGLE · MSM8916 · ANDROID 4.4.4</text>
+
+  <!-- bridge -->
+  <rect class="key" x="322" y="78" width="626" height="176" rx="10"/>
+  <text class="t" x="342" y="106">sms37 bridge</text>
+  <text class="s" x="466" y="106">/data/local/sms37, started by init at every boot</text>
+
+  <rect class="box" x="342" y="122" width="186" height="112" rx="8"/>
+  <text class="t" x="435" y="148" text-anchor="middle">forward_new</text>
+  <text class="s" x="435" y="172" text-anchor="middle">reads new rows with sqlite3</text>
+  <text class="s" x="435" y="192" text-anchor="middle">remembers the last ids</text>
+  <text class="s" x="435" y="212" text-anchor="middle">in the state file</text>
+
+  <rect class="box" x="542" y="122" width="186" height="112" rx="8"/>
+  <text class="t" x="635" y="148" text-anchor="middle">poll_updates</text>
+  <text class="s" x="635" y="172" text-anchor="middle">Telegram long poll, curl</text>
+  <text class="s" x="635" y="192" text-anchor="middle">JSON read by json.awk</text>
+  <text class="s" x="635" y="212" text-anchor="middle">owner's chat only</text>
+
+  <rect class="box" x="742" y="122" width="186" height="112" rx="8"/>
+  <text class="t" x="835" y="148" text-anchor="middle">do_send</text>
+  <text class="s" x="835" y="172" text-anchor="middle">after /yes: queues the SMS</text>
+  <text class="s" x="835" y="192" text-anchor="middle">then watches the sms row</text>
+  <text class="s" x="835" y="212" text-anchor="middle">for sent or failed</text>
+
+  <!-- databases -->
+  <rect class="db" x="322" y="316" width="206" height="74" rx="8"/>
+  <text class="t" x="425" y="345" text-anchor="middle">mmssms.db</text>
+  <text class="s" x="425" y="368" text-anchor="middle">sms, pdu, part, addr</text>
+
+  <rect class="db" x="542" y="316" width="186" height="74" rx="8"/>
+  <text class="t" x="635" y="345" text-anchor="middle">contacts2.db</text>
+  <text class="s" x="635" y="368" text-anchor="middle">calls</text>
+
+  <rect class="box" x="742" y="316" width="206" height="74" rx="8"/>
+  <text class="t" x="845" y="345" text-anchor="middle">com.android.mms</text>
+  <text class="s" x="845" y="368" text-anchor="middle">sends queued SMS</text>
+
+  <!-- phone process -->
+  <rect class="box" x="322" y="432" width="626" height="58" rx="8"/>
+  <text class="t" x="635" y="458" text-anchor="middle">com.android.phone + telephony and contacts providers</text>
+  <text class="s" x="635" y="478" text-anchor="middle">store every received text and every call, with no screen or app open</text>
+
+  <!-- modem -->
+  <rect class="box" x="322" y="520" width="626" height="50" rx="8"/>
+  <text class="t" x="635" y="551" text-anchor="middle">LTE modem and SIM</text>
+
+  <!-- dongle internal arrows -->
+  <path class="ln" d="M635 520 V490" marker-start="url(#a)" marker-end="url(#a)"/>
+  <path class="ln" d="M425 432 V390" marker-end="url(#a)"/>
+  <path class="ln" d="M635 432 V390" marker-end="url(#a)"/>
+  <path class="ln" d="M845 390 V432" marker-end="url(#a)"/>
+  <path class="ln" d="M425 316 V234" marker-end="url(#a)"/>
+  <path class="ln" d="M600 316 L460 234" marker-end="url(#a)"/>
+  <path class="ln" d="M845 234 V316" marker-end="url(#a)"/>
+  <path class="ln" d="M728 178 H742" marker-end="url(#a)"/>
+
+  <!-- outside to dongle -->
+  <path class="ln" d="M240 258 H272 V166 H322" marker-start="url(#a)" marker-end="url(#a)"/>
+  <path class="ln" d="M240 420 H272 V545 H322" marker-start="url(#a)" marker-end="url(#a)"/>
+</svg>

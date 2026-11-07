@@ -1,372 +1,99 @@
+# UZ801 SMS ↔ Telegram bridge
 
-# ESP32-C3 Home Weather Alert System
+Turn a cheap UZ801 4G USB dongle into a pocket SMS gateway. Put a SIM in it, plug it into any USB power bank, and every text and call that reaches that SIM shows up in your Telegram. You can also send SMS from the same SIM by messaging your bot.
 
-<!-- Use a local or remote reference to your main image showcasing the project, e.g., a web GUI screenshot. -->
-![ESP32 Weather Alert](assets/weather_station.png)
+It runs **on the dongle itself**. No PC, no firmware flashing and no Android app: the stick already ships Android 4.4 with a root shell, `curl`, `sqlite3` and BusyBox, so the bridge is a small shell script started at boot.
 
-## Table of Contents
+<img src="docs/images/uz801-dongle.jpg" alt="The UZ801 dongle: a black USB stick labelled 4G LTE WIFI MODEM" width="520">
 
-- [Overview](#overview)
-- [Features](#features)
-- [Hardware Requirements](#hardware-requirements)
-  - [Example Hardware Setup](#example-hardware-setup)
-  - [ESP32-C3 Pinout](#esp32-c3-pinout)
-  - [DHT Sensor Pinouts](#dht-sensor-pinouts)
-- [Software Requirements](#software-requirements)
-- [Installation](#installation)
-  - [1. Install PlatformIO](#1-install-platformio)
-  - [2. Clone the Repository](#2-clone-the-repository)
-  - [3. Open the Project in VSCode](#3-open-the-project-in-vscode)
-  - [4. Install Dependencies](#4-install-dependencies)
-- [Configuration](#configuration)
-  - [1. Configure Wi-Fi Credentials](#1-configure-wi-fi-credentials)
-  - [2. Adjust SMTP Port and Security Settings](#2-adjust-smtp-port-and-security-settings)
-  - [3. Calibrate Alert Thresholds](#3-calibrate-alert-thresholds)
-- [Usage](#usage)
-  - [1. Using VSCode PlatformIO Extension](#1-using-vscode-platformio-extension)
-  - [2. Using Terminal with PlatformIO CLI](#2-using-terminal-with-platformio-cli)
-- [Project Structure](#project-structure)
-- [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
-  - [Code of Conduct](#code-of-conduct)
-- [License](#license)
-- [Acknowledgments](#acknowledgments)
+![How texts and calls travel between the mobile network, the dongle, Telegram and your phone](docs/images/architecture.svg)
 
----
+## What it does
 
-## Overview
+| Feature | How you use it |
+|---|---|
+| Forward received SMS | Automatic |
+| Forward long texts that the carrier delivers as MMS (LMS) | Automatic |
+| Report incoming, missed and rejected calls | Automatic, once the call has ended |
+| Show recent texts | `/check` or `/check 10` |
+| Show recent calls | `/calls` or `/calls 10` |
+| Send an SMS, with a confirmation step | `/send 010-0000-0000 hello`, then `/yes` or `/no` |
+| Keep working through outages | Retries until LTE is back, then sends what it missed |
 
-The **ESP32-C3 Home Weather Alert System** uses an ESP32-C3 microcontroller to monitor temperature and humidity via a **DHT** sensor. When significant changes in these parameters are detected beyond predefined thresholds, the system automatically sends out email alerts to designated recipients. The project also features a **web-based GUI** for real-time data monitoring and configuration, including threshold adjustments, NTP synchronization, and debug logs.
+Only your own Telegram chat can control the bot. Everyone else is ignored.
 
----
-Web Demo: [ESP32-C3 Home Weather Alert System - 192.0.2.1:80](192.0.2.1:80)
-<!-- [GitHub repository](https://github.com/jakhon37/esp32-c3-home-weather-alert/issues).   -->
-<!-- Web Demo: https://192.0.2.1:80  -->
----
+The dongle keeps doing its normal job while the bridge runs, so its Wi-Fi hotspot and USB internet still work.
 
-## Features
+<img src="docs/images/telegram-chat.png" alt="A Telegram chat with the bot showing a sent SMS, a received text and missed-call alerts" width="380">
 
-- **Real-Time Sensor Monitoring**: Continuously reads temperature and humidity data using a DHT sensor (DHT11 or DHT22).
-- **Email Alerts**: Automates email notifications when significant changes in temperature or humidity occur.
-- **Web-Based GUI**: Offers a user-friendly interface to view sensor data and manage system settings.
-- **NTP Time Sync**: Ensures accurate timestamps by synchronizing with an NTP server.
-- **Network Resilience**: Reconnects to Wi-Fi automatically if the connection is lost.
-- **Configurable Thresholds**: Allows you to set high/low temperature and humidity thresholds.
-- **Debug Logging**: Provides detailed logs for troubleshooting.
+*A real chat with the bridge: an SMS sent, a text received and missed-call alerts, with the command menu below. Phone numbers are covered. You set the menu in @BotFather, and [setup](docs/setup.md#5-create-a-telegram-bot) has the full list, including `/calls`.*
 
----
+## Quick start
 
-## Hardware Requirements
+Full steps, with what you should see at each one, are in **[docs/setup.md](docs/setup.md)**.
 
-- **ESP32-C3 Development Board** (e.g., ESP32-C3-DevKitM-1)
-- **DHT Sensor** (DHT11 or DHT22)
-- **OLED or LCD Display** (Optional, but recommended for local data visualization)
-- **Jumper Wires**
-- **Breadboard** (Optional, for prototyping)
-- **USB Cable / Power Adapter** for ESP32
+```bash
+git clone https://github.com/jakhon37/uz801-sms-telegram-bridge.git ~/uz801-sms-telegram-bridge
+cd ~/uz801-sms-telegram-bridge
 
-### Example Hardware Setup
+sudo apt install adb
+sudo adb start-server
 
-Below is a **breadboard wiring diagram** showing how to connect a **DHT22** sensor and an **OLED** display to the **ESP32-C3**:
+# Turn on ADB in the dongle (it restarts; wait about 30 seconds)
+curl -X POST -d '{"funcNo":2001}' http://192.168.100.1/ajax
+adb devices
 
-![ESP32-C3 Home Weather Station](assets/circuit_design.png)
-
-1. **DHT22 Connections**:
-   - **Pin 1 (VCC)** → **3.3V** on ESP32
-   - **Pin 2 (Data)** → **GPIO10** on ESP32
-   - **Pin 3 (NC)** → Not Connected
-   - **Pin 4 (GND)** → **GND** on ESP32
-
-2. **OLED Connections**:
-   - **VCC** → **3.3V** on ESP32
-   - **GND** → **GND** on ESP32
-   - **SDA** → **GPIO8** (SDA default for ESP32-C3)
-   - **SCK** → **GPIO9** (SCL default for ESP32-C3)
-
-### ESP32-C3 Pinout
-
-From the above image, you can see there is a **pinout diagram** for the ESP32-C3 DevKit, showing default I2C pins (GPIO8 for SDA, GPIO9 for SCL) and available GPIO pins:
-
-<!-- ![ESP32-C3 Pinout](assets/esp32-c3supermini.jpeg) -->
-
-### DHT Sensor Pinouts
-
-Depending on your DHT sensor model, use the corresponding pinout diagram:
-
-<!-- ![DHT Pinouts](assets/dht_pinouts.webp) -->
-
-- **DHT11** or **DHT22** typically have:
-  - **VCC** (3.3V)
-  - **Data**
-  - **NC** (Not Connected)
-  - **GND**[GitHub repository](https://github.com/jakhon37/esp32-c3-home-weather-alert/issues).  
-
----
-
-## Software Requirements
-
-- **PlatformIO**: Cross-platform build system, integrated into **VSCode**.
-- **Arduino Framework**: Underlying development environment for the ESP32.
-- **Adafruit DHT Sensor Library**: For interfacing with the DHT sensor.
-- **ESP Mail Client Library**: For sending email alerts.
-- **LiquidCrystal_I2C** or **Adafruit_SSD1306** (optional) for display usage.
-
----
-
-## Installation
-
-### 1. Install PlatformIO
-
-If you haven't installed PlatformIO yet, follow these steps:
-
-1. **Install Visual Studio Code (VSCode)**:
-   - Download and install from [VSCode Download](https://code.visualstudio.com/).
-
-2. **Install PlatformIO Extension**:
-   - Open VSCode.
-   - Navigate to the Extensions panel (`Ctrl+Shift+X` or `Cmd+Shift+X` on macOS).
-   - Search for `PlatformIO IDE` and install the official extension.
-
-3. **Verify Installation**:
-   - Click on the PlatformIO icon in the sidebar to open PlatformIO Home.
-   - Ensure PlatformIO Core is up-to-date.
-
-### 2. Clone the Repository
-
-```sh
-git clone https://github.com/jakhon37/esp32-c3-home-weather-alert.git
-cd esp32-c3-home-weather-alert
+bash pc/setup.sh                 # store your bot token, link your chat
+dongle/install-boot-hook.sh      # start the bridge at every boot
+dongle/install.sh                # copy the bridge over and start it
 ```
 
-### 3. Open the Project in VSCode
+Then unplug the dongle and move it to a power bank. Within a minute or two it connects to LTE and answers in Telegram.
 
-1. **File > Open Folder**
-2. Select the cloned `esp32-c3-home-weather-alert` directory.
-3. PlatformIO should automatically detect the project.
+## Guides
 
-### 4. Install Dependencies
+| Guide | What's inside |
+|---|---|
+| [docs/setup.md](docs/setup.md) | Step-by-step install from a new dongle |
+| [docs/device.md](docs/device.md) | The hardware and software, USB modes, web API, storage, and how to read all of it yourself |
+| [docs/how-it-works.md](docs/how-it-works.md) | Boot sequence, message flows, databases, SELinux and the design choices |
+| [docs/operations.md](docs/operations.md) | Logs, updates, token rotation, data use, uninstall and troubleshooting |
 
-Open a new terminal in VSCode (`Ctrl+`` or **View > Terminal**) and run:
+## Repository layout
 
-```sh
-pio run
+```text
+dongle/                     Runs on the stick
+  sms37.sh                  The bridge: forwarding, bot commands, sending
+  json.awk                  Reads Telegram's JSON (BusyBox awk, UTF-8 safe)
+  run.sh                    Restarts sms37.sh if it stops; allows one copy only
+  install-recovery.sh       Boot hook; goes in /system/etc
+  install-boot-hook.sh      PC script: installs the boot hook once
+  install.sh                PC script: copies the bridge and restarts it
+pc/                         Runs on your PC
+  setup.sh                  Stores the bot token and links your chat
+  sms_forward.py            PC version of the bridge, reads the dongle over ADB
+  sms-forward.service       systemd user service for the PC version
+docs/                       Guides and diagrams
 ```
 
-Or click the **PlatformIO Build** button (checkmark icon) or press `Ctrl+Shift+P` → `PlatformIO: Build`.
+## Tested on
 
+One UZ801 stick: firmware V2.3.12, Android 4.4.4, MSM8916, with a KT SIM on LTE in South Korea. UZ801 sticks are sold with different firmware, so run the checks in [docs/device.md](docs/device.md#check-your-stick) before installing on a different one.
 
-PlatformIO will fetch and install necessary libraries defined in `platformio.ini`.
+## Security
 
----
+Read this before using it for anything important:
 
-## Configuration
+- Texts, including one-time codes, pass through Telegram and are stored in your chat there. Anyone holding your Telegram session can read them.
+- The bot token lives on the dongle. Anyone with the stick and a USB cable has a root shell and can read the token and every stored text. Treat the stick like an unlocked phone.
+- ADB stays on after setup. It's reachable over USB only: port 5555 was closed on the tested stick.
+- Change the dongle's Wi-Fi password and web admin password if they are still the defaults.
+- Only use a SIM and number you are allowed to use, and don't send unwanted messages.
 
-### 1. Configure Wi-Fi Credentials
+## Repository history
 
-Edit `include/Config.h`:
-
-```cpp
-#ifndef CONFIG_H
-#define CONFIG_H
-
-// WiFi Configuration
-const char* WIFI_SSID = "Your_WiFi_SSID";
-const char* WIFI_PASSWORD = "Your_WiFi_Password";
-
-// Email Configuration
-const char* SMTP_HOST = "smtp.gmail.com";
-const uint16_t SMTP_PORT = 587; // 465 for SSL/TLS
-const char* AUTHOR_EMAIL = "user@example.com";
-const char* AUTHOR_PASSWORD = "your_email_password_or_app_specific_password";
-const char* RECIPIENT_EMAIL = "recipient_email@example.com";
-
-// DHT Sensor Configuration
-#define DHTPIN 10
-#define DHTTYPE DHT22
-
-// LCD Display Configuration
-#define LCD_ADDRESS 0x27
-#define LCD_COLS 16
-#define LCD_ROWS 2
-#define SDA_PIN 20 //8
-#define SCL_PIN 21 //9
-
-// OLED Display Configuration
-#define OLED_WIDTH 128
-#define OLED_HEIGHT 32
-#define OLED_SDA_PIN 8 //20 //8
-#define OLED_SCL_PIN 9 //21 //9
-#define OLED_RESET_PIN -1
-
-// Alert Thresholds
-const float TEMP_HIGH_THRESHOLD = 26.5;
-const float TEMP_LOW_THRESHOLD = 22.0;
-const float HUM_HIGH_THRESHOLD = 85.0;
-const float HUM_LOW_THRESHOLD = 40.0;
-const float TEMP_CHANGE_THRESHOLD = 1.0;       // °C
-const float HUM_CHANGE_THRESHOLD = 5.0;        // %
-const unsigned long ALERT_COOLDOWN = 60000;     // 1 minute in milliseconds
-
-#endif // CONFIG_H
-
-```
-
-**Security Note**: For production or public repos, avoid hardcoding credentials—consider app passwords or environment variables.
-
-### 2. Adjust SMTP Port and Security Settings
-
-- **Port 587** for **STARTTLS**.
-- **Port 465** for **SSL/TLS**.
-
-### 3. Calibrate Alert Thresholds
-
-Set `TEMP_CHANGE_THRESHOLD` and `HUM_CHANGE_THRESHOLD` to fine-tune alert sensitivity.
-
----
-
-## Usage
-
-You can build, upload, and monitor your project via **VSCode** or **Terminal**.
-
-### 1. Using VSCode PlatformIO Extension
-
-1. **Build**:
-   - Click the **PlatformIO Build** button (checkmark icon) or press `Ctrl+Shift+P` → `PlatformIO: Build`.
-
-2. **Upload**:
-   - Connect ESP32-C3 via USB.
-   - Click the **PlatformIO Upload** button (right arrow icon).
-
-3. **Monitor Serial**:
-   - Click the **PlatformIO Monitor** button (plug icon).
-   - Set baud rate to **115200** if prompted.
-
-4. **Web GUI**:
-   - Check the Serial output for your ESP32 IP address.
-   - Open a browser and go to `http://<ESP32_IP_Address>`.
-
-### 2. Using Terminal with PlatformIO CLI
-
-1. **Install PlatformIO CLI** (if not already):
-   ```sh
-   pip install platformio
-   ```
-
-2. **Build**:
-   ```sh
-   pio run
-   ```
-
-3. **Upload**:
-   ```sh
-   pio run -t upload
-   ```
-
-4. **Monitor**:
-   ```sh
-   pio device monitor -b 115200
-   ```
-
-5. **Web GUI**:
-   - Note the IP address in the Serial Monitor.
-   - Open `http://<ESP32_IP_Address>` in your browser.
-
----
-
-## Project Structure
-
-```
-esp32-c3-home-weather-alert/
-├── include/
-│   ├── Config.h
-│   └── (other headers)
-├── lib/
-│   ├── DhtSensor/
-│   ├── EmailClient/
-│   ├── WebGui/
-│   ├── OLEDDisplay/ (or LCDisplay/)
-│   └── ...
-├── src/
-│   └── main.cpp
-├── test/
-├── platformio.ini
-├── README.md
-└── CODE_OF_CONDUCT.md
-```
-
-- **include/**: Shared headers and configurations (`Config.h`).
-- **lib/**: Custom libraries (e.g., `DhtSensor`, `EmailClient`, `WebGui`, `OLEDDisplay`/`LCDisplay`).
-- **src/**: Main application source (`main.cpp`).
-- **test/**: Unit or integration tests.
-- **platformio.ini**: PlatformIO build and dependency configuration.
-- **README.md**: Project documentation.
-
----
-
-## Troubleshooting
-
-1. **Check Wiring**:
-   - Ensure DHT sensor pinout is correct.
-   - Verify SDA and SCL pins for I2C devices (OLED) match the code.
-
-2. **I2C Address**:
-   - If the OLED isn't displaying, use an I2C scanner to confirm the address (`0x3C`, etc.).
-
-3. **Serial Monitor**:
-   - Watch logs for Wi-Fi connection issues, sensor read failures, or email errors.
-   - Increase debug outputs if needed.
-
-4. **Email Credentials**:
-   - If using Gmail with 2FA, generate an [App Password](https://support.google.com/accounts/answer/185833) instead of your normal password.
-
-5. **NTP Sync**:
-   - Verify the NTP server address if time synchronization fails.
-
----
-
-## Contributing
-
-1. **Fork and Clone**:
-   ```sh
-   git clone https://github.com/<yourusername>/esp32-c3-home-weather-alert.git
-   cd esp32-c3-home-weather-alert
-   ```
-
-2. **Create a Branch**:
-   ```sh
-   git checkout -b feature/AmazingFeature
-   ```
-
-3. **Make Changes & Commit**:
-   ```sh
-   git commit -m "Add AmazingFeature"
-   ```
-
-4. **Push & Pull Request**:
-   ```sh
-   git push origin feature/AmazingFeature
-   ```
-   - Submit a PR on GitHub.
-
-### Code of Conduct
-
-Please follow the [Code of Conduct](https://github.com/jakhon37/esp32-c3-home-weather-alert/blob/main/CODE_OF_CONDUCT.md) to help maintain a welcoming environment for all contributors.
-
----
+The log starts with commits from my earlier ESP32-C3 home weather station (January 2025). That code is on the [`esp32-weather-station`](https://github.com/jakhon37/uz801-sms-telegram-bridge/tree/esp32-weather-station) branch, with private values and third-party images removed. Work on the bridge starts on 3 November 2026.
 
 ## License
 
-Distributed under the **MIT License**. Refer to `LICENSE` for details.
-
----
-
-## Acknowledgments
-
-- [ESP-Mail-Client by Mobizt](https://github.com/mobizt/ESP-Mail-Client) — robust email sending support.
-- [Adafruit DHT Sensor Library](https://github.com/adafruit/DHT-sensor-library) — easy DHT sensor handling.
-- [Adafruit SSD1306 / LiquidCrystal_I2C](https://github.com/adafruit/) — display libraries for visual feedback.
-- The open-source community for invaluable resources, examples, and troubleshooting help.
-
----
-
-If you have any questions or need support, please open an issue in the [GitHub repository](https://github.com/jakhon37/esp32-c3-home-weather-alert/issues).  
+[MIT](LICENSE)
